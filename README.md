@@ -2,7 +2,7 @@
 
 A structured decision-making tool that helps you compare options through multi-dimensional scoring, customizable weighting, and transparent ranking.
 
-一个结构化决策工具——通过多维度评分、可调权重和透明排序，帮助你理性对比各个选项。
+纠结、犹豫，做不出选择？用Choosely,一个通过多维度评分和加权的决策工具，帮助你理性对比各个选择。
 
 **Live Demo / 在线体验** → [imjane.top/choosely](http://imjane.top/choosely/)
 
