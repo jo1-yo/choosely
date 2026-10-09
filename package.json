@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test": "node --test src/*.test.js",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "posthog-js": "^1.438.5",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },

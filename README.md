@@ -55,9 +55,9 @@ Where:
   normalized_weight = weight[d] / Σ(weights) — sums to 1.0
 ```
 
-The default weight for each dimension is **12.5** (equal distribution across 8 dimensions, totaling 100). Users can drag any weight from 0 to 50.
+The default weight for each dimension is **12.5** (equal distribution across 8 dimensions). Users can drag any weight from 0 to 50. Weights are **relative**: the score uses each weight divided by the sum, and the UI shows that share (always adding up to 100%), so there is no "total must equal 100" to satisfy.
 
-每个维度默认权重 **12.5**（8 个维度平分 100）。用户可将权重在 0–50 之间任意调整。
+每个维度默认权重 **12.5**（8 个维度平分）。用户可将权重在 0–50 之间任意调整。权重是**相对**的：算分时用的是每项除以总和后的占比，界面也直接显示这个占比（始终合计 100%），所以不需要用户凑满 100。
 
 Results are sorted by total score descending. Each result card shows:
 - Overall rank and score
@@ -96,16 +96,19 @@ choosely/
 └── src/
     ├── main.jsx                # React root mount
     ├── App.jsx                 # App shell (imports Choosely)
-    ├── choosely.jsx            # Core component (~860 lines)
+    ├── choosely.jsx            # Core component: all UI and styles
+    ├── scoring.js              # Dimensions + scoring engine (pure functions)
+    ├── scoring.test.js         # Unit tests for the scoring engine (npm test)
+    ├── analytics.js            # Optional PostHog wrapper (off unless a key is set)
     ├── index.css               # Global base styles
     └── App.css                 # Layout styles
 ```
 
 ### Architecture Highlights / 架构亮点
 
-- **Single-component design** — All UI, logic, and styles live in `src/choosely.jsx`, making it easy to embed or port.
-- **Zero runtime dependencies** beyond React and ReactDOM.
-- **Fully client-side** — No server, no database, no API calls. All computation happens in the browser.
+- **Single-component UI** — All UI and styles live in `src/choosely.jsx`; the scoring maths lives in `src/scoring.js` so it can be unit-tested.
+- **Minimal runtime dependencies** — React and ReactDOM; `posthog-js` is only downloaded when an analytics key is configured.
+- **Fully client-side** — No server, no database. All computation happens in the browser; progress is saved in `localStorage`, so a refresh doesn't lose your ratings.
 - **Responsive layout** — Fluid typography and spacing via `clamp()` / media queries; card hover effects on desktop, touch-friendly on mobile.
 - **CSS custom properties** — All colors, spacing, and shadows are defined as CSS variables for easy theming.
 - **Memoized computation** — `useMemo` for scores and rankings; `useCallback` for option CRUD — avoids unnecessary re-renders.
@@ -145,11 +148,37 @@ Output goes to `dist/`. To preview the production build locally:
 npm run preview
 ```
 
-### Lint / 代码检查
+### Lint & Test / 代码检查与测试
 
 ```bash
 npm run lint
+npm test        # scoring engine unit tests; also run in CI before every deploy
 ```
+
+## Analytics (PostHog) / 数据分析
+
+Optional and **off by default**. Set a PostHog project key and the app reports which step people reach and where they get stuck.
+
+可选，默认关闭。配置 PostHog 项目 key 后，可以看到用户走到了哪一步、卡在哪里。
+
+1. Create a project at [posthog.com](https://posthog.com) and copy the **Project API key** (`phc_…`).
+2. GitHub repo → Settings → Secrets and variables → Actions → **Variables** → add `POSTHOG_KEY` (and `POSTHOG_HOST` for EU cloud: `https://eu.i.posthog.com`). The key is public by design, so a variable (not a secret) is fine.
+3. In PostHog → Project settings, turn on **Session replay** (recordings) if you want to watch sessions.
+4. Push to `main`; the workflow bakes the key into the build.
+
+Locally, copy `.env.example` to `.env.local` to test. In `npm run dev` every event is also printed to the console as `[analytics]`.
+
+**Privacy.** Autocapture is off. Only hand-written events with counts and step names are sent — never option names or descriptions. Session replay masks all inputs and anything with the `ph-mask` class. Respects Do Not Track. To exclude yourself, open `/choosely/?notrack` once in that browser (`?track` re-enables).
+
+| Event | Meaning |
+|-------|---------|
+| `step_viewed` | Funnel: `options → rate → weight → results` |
+| `continue_blocked` | Clicked Continue but couldn't proceed (`reason`: `unnamed` / `unrated` / `no_weight`, plus `missing`) — the clearest "stuck" signal |
+| `rating_started`, `option_rated`, `ratings_completed` | Progress through the 8×N rating grid |
+| `option_added/removed`, `lang_switched`, `step_jump` | Setup and navigation behaviour |
+| `weights_adjusted`, `weights_reset`, `tip_opened` | Weight step engagement |
+| `results_viewed`, `result_expanded`, `restart` | Outcome (`results_viewed` includes the gap between #1 and #2, and whether it was a tie) |
+| `$pageleave` | Carries the `step` the visitor was on when they left |
 
 ## Deployment / 部署
 

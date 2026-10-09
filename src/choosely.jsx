@@ -1,4 +1,9 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { DIMENSIONS, DEFAULT_WEIGHTS, EMPTY_RATINGS, weightShares, rankOpts } from "./scoring";
+import { track, setContext } from "./analytics";
+
+const STORAGE_KEY = "choosely:v1";
+const STEP_KEYS = ["options", "rate", "weight", "results"];
 
 /* ═══════════════════════════════════════════════════════════════════════════
    I18N
@@ -42,6 +47,10 @@ const i18n = {
     allDone: "All rated",
     of: "of",
     langSwitch: "中文",
+    nameMore: (n) => `Name ${n} more option${n > 1 ? "s" : ""} to continue`,
+    rateMore: (n) => `Rate ${n} more to continue`,
+    weightNone: () => "Give at least one dimension a weight above 0",
+    privacy: "Your options and notes stay on your device. We only record anonymous usage (like which step you reach) to improve Choosely.",
   },
   zh: {
     brand: "Choosely",
@@ -80,66 +89,12 @@ const i18n = {
     allDone: "全部完成",
     of: "/",
     langSwitch: "EN",
+    nameMore: (n) => `还有 ${n} 个选项没填名称`,
+    rateMore: (n) => `还差 ${n} 项评分才能继续`,
+    weightNone: () => "至少给一个维度分配权重",
+    privacy: "你填写的选项和备注只保存在本机，不会上传。我们只记录匿名的使用情况（比如走到了哪一步）用来改进产品。",
   },
 };
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   DIMENSIONS — with bilingual desc and scoring direction
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-const DIMENSIONS = [
-  {
-    id: "longTermImpact",
-    en: "Long-term Impact", zh: "长期收益", negative: false,
-    descEn: "How much compounding value will this create in 3–5 years? Higher score = greater long-term payoff.",
-    descZh: "这个选择在 3–5 年后能带来多大的复利回报？分数越高 = 长期收益越大。",
-  },
-  {
-    id: "urgency",
-    en: "Urgency", zh: "时间窗口", negative: false,
-    descEn: "How time-sensitive is this opportunity? Higher score = narrower window, must act soon.",
-    descZh: "这个机会窗口有多紧迫？分数越高 = 时间越紧迫，越需要尽快行动。",
-  },
-  {
-    id: "effortCost",
-    en: "Effort Cost", zh: "投入成本", negative: true,
-    descEn: "How much time, energy, and resources does it require? Higher score = more costly. This is an inverse metric — higher scores reduce the total.",
-    descZh: "需要投入多少时间、精力和资源？分数越高 = 成本越大。此为逆向指标，评分越高总分越低。",
-  },
-  {
-    id: "successProbability",
-    en: "Success Probability", zh: "成功概率", negative: false,
-    descEn: "Given your current skills and resources, how likely is success? Higher score = better odds.",
-    descZh: "以你现有的能力和资源，成功的可能性有多大？分数越高 = 成功概率越大。",
-  },
-  {
-    id: "personalInterest",
-    en: "Personal Interest", zh: "内在热情", negative: false,
-    descEn: "How much genuine passion and curiosity do you feel? Higher score = stronger intrinsic motivation.",
-    descZh: "你对这件事有多大的热情和好奇心？分数越高 = 内在动力越强。",
-  },
-  {
-    id: "optionality",
-    en: "Optionality", zh: "可逆性", negative: false,
-    descEn: "Can you reverse course if it doesn't work out? Higher score = more flexibility preserved.",
-    descZh: "如果走错了还能回头吗？分数越高 = 保留的灵活性越大。",
-  },
-  {
-    id: "strategicLeverage",
-    en: "Strategic Leverage", zh: "战略杠杆", negative: false,
-    descEn: "Does this unlock more opportunities — new networks, skills, or domains? Higher score = greater leverage.",
-    descZh: "是否能撬动更多机会？比如打开新人脉、解锁新能力、进入新领域。分数越高 = 杠杆越大。",
-  },
-  {
-    id: "risk",
-    en: "Risk Level", zh: "风险程度", negative: true,
-    descEn: "How bad is the worst-case scenario? Can you absorb failure? Higher score = greater risk. This is an inverse metric — higher scores reduce the total.",
-    descZh: "最坏情况有多糟？你能承受失败的代价吗？分数越高 = 风险越大。此为逆向指标，评分越高总分越低。",
-  },
-];
-
-const DEFAULT_WEIGHTS = Object.fromEntries(DIMENSIONS.map(d => [d.id, 12.5]));
-const EMPTY_RATINGS = Object.fromEntries(DIMENSIONS.map(d => [d.id, 0]));
 
 const DEMO = [
   { id: "1", title: "Join an early-stage startup", titleZh: "加入早期创业公司", desc: "AI startup as technical co-founder", descZh: "朋友的 AI 初创，担任技术合伙人", ratings: { ...EMPTY_RATINGS } },
@@ -149,38 +104,45 @@ const DEMO = [
 ];
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   CALCULATION ENGINE
+   STATE HELPERS (persistence + step gating)
    ═══════════════════════════════════════════════════════════════════════════ */
 
-function normWeights(w) {
-  const t = Object.values(w).reduce((a, b) => a + b, 0);
-  if (!t) return w;
-  const r = {};
-  for (const k in w) r[k] = w[k] / t;
-  return r;
+const isComplete = (o) => DIMENSIONS.every(d => o.ratings[d.id] > 0);
+const num = (v, lo, hi, fallback) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback;
+};
+
+// Furthest step the user may be on given their answers (used for Back/Forward and restore).
+function reachableStep(options, weights) {
+  if (options.length < 2 || options.some(o => !o.title.trim())) return 0;
+  if (!options.every(isComplete)) return 1;
+  if (!(Object.values(weights).reduce((a, b) => a + b, 0) > 0)) return 2;
+  return 3;
 }
 
-function calcScore(opt, weights) {
-  const nw = normWeights(weights);
-  const bd = [];
-  let total = 0;
-  for (const d of DIMENSIONS) {
-    const raw = opt.ratings[d.id] || 0;
-    const norm = raw * 20;
-    const eff = d.negative ? -norm : norm;
-    const w = nw[d.id] || 0;
-    const c = w * eff;
-    total += c;
-    bd.push({ ...d, raw, norm, weight: w * 100, contribution: +c.toFixed(2) });
-  }
-  bd.sort((a, b) => b.contribution - a.contribution);
-  return { total: +total.toFixed(2), breakdown: bd, top2Pos: bd.filter(b => b.contribution > 0).slice(0, 2), top1Neg: bd.filter(b => b.contribution < 0).slice(-1) };
-}
-
-function rankOpts(options, weights) {
-  const sc = options.map(o => ({ ...o, score: calcScore(o, weights) }));
-  sc.sort((a, b) => b.score.total - a.score.total);
-  return sc.map((o, i) => ({ ...o, rank: i + 1 }));
+// Progress is kept in localStorage so a refresh or an in-app-browser reload doesn't wipe 30+ ratings.
+function loadInitial() {
+  try {
+    const s = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    if (s && Array.isArray(s.options) && s.options.length >= 2) {
+      const str = (v) => (typeof v === "string" ? v : "");
+      const options = s.options.map((o, i) => ({
+        id: str(o.id) || `saved-${i}`,
+        title: str(o.title), titleZh: str(o.titleZh), desc: str(o.desc), descZh: str(o.descZh),
+        ratings: Object.fromEntries(DIMENSIONS.map(d => [d.id, Math.round(num(o.ratings?.[d.id], 0, 5, 0))])),
+      }));
+      const weights = Object.fromEntries(DIMENSIONS.map(d => [d.id, num(s.weights?.[d.id], 0, 50, 12.5)]));
+      return {
+        lang: s.lang === "zh" ? "zh" : "en",
+        options,
+        weights,
+        step: Math.min(Math.round(num(s.step, 0, 3, 0)), reachableStep(options, weights)),
+        ratingTab: Math.min(Math.round(num(s.ratingTab, 0, 99, 0)), options.length - 1),
+      };
+    }
+  } catch { /* storage unavailable or corrupt — start fresh */ }
+  return { lang: "en", options: DEMO, weights: DEFAULT_WEIGHTS, step: 0, ratingTab: 0 };
 }
 
 function genSummary(opt, s, lang) {
@@ -201,8 +163,8 @@ function genSummary(opt, s, lang) {
    STYLES
    ═══════════════════════════════════════════════════════════════════════════ */
 
+// Fonts are loaded from index.html (non-blocking) instead of an @import here.
 const GLOBAL_CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
 :root {
   --bg: #FFFFFF;
@@ -241,9 +203,14 @@ input[type=range]::-webkit-slider-thumb:hover { border-color: var(--border-hover
 input[type=range]::-webkit-slider-thumb:active { transform: scale(.95); }
 @keyframes fadeUp { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } }
 @keyframes scaleIn { from { opacity:0; transform:scale(.97) } to { opacity:1; transform:scale(1) } }
+@keyframes nudge { 0%,60% { background: rgba(202,138,4,.16) } 100% { background: transparent } }
 .anim-fade { animation: fadeUp .5s var(--ease) both; }
 .anim-scale { animation: scaleIn .4s var(--ease) both; }
+.row-nudge { padding: 6px 8px; margin: -6px -8px; border-radius: var(--radius-xs); animation: nudge 1.6s var(--ease) 1; }
 ::selection { background: var(--accent-light); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
 .app-shell {
   width: 100%;
   max-width: min(100%, 1200px);
@@ -330,6 +297,7 @@ input[type=range]::-webkit-slider-thumb:active { transform: scale(.95); }
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 14px;
+  scroll-margin-top: 12px;
 }
 @media (min-width: 900px) {
   .option-tabs {
@@ -398,44 +366,48 @@ function Pill({ children, caution }) {
   return <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "6px 14px", borderRadius: 20, fontSize: 14, fontWeight: 500, fontFamily: "var(--font)", border: "1px solid", ...c }}>{children}</span>;
 }
 
-/* ── Step bar: permanent line, fills as steps complete ── */
-function StepBar({ current, labels }) {
+/* ── Step bar: permanent line, fills as steps complete. Finished steps can be tapped to jump back. ── */
+function StepBar({ current, labels, maxStep, onSelect }) {
   return (
     <div style={{ display: "flex", alignItems: "flex-start", gap: 0, margin: "0 auto 36px", position: "relative" }}>
-      {labels.map((l, i) => (
-        <div key={i} style={{ display: "flex", alignItems: "center", flex: i < labels.length - 1 ? 1 : "none" }}>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, zIndex: 1 }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 14, fontWeight: 600, transition: "all .35s var(--ease)",
-              background: i <= current ? "var(--accent)" : "var(--surface)",
-              color: i <= current ? "#fff" : "var(--text-quaternary)",
-              border: i <= current ? "none" : "1.5px solid var(--border)",
-            }}>
-              {i < current ? "✓" : i + 1}
+      {labels.map((l, i) => {
+        const canJump = i !== current && i <= maxStep;
+        return (
+          <div key={i} style={{ display: "flex", alignItems: "center", flex: i < labels.length - 1 ? 1 : "none" }}>
+            <div onClick={canJump ? () => onSelect(i) : undefined} role={canJump ? "button" : undefined} aria-current={i === current ? "step" : undefined}
+              style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, zIndex: 1, cursor: canJump ? "pointer" : "default" }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 14, fontWeight: 600, transition: "all .35s var(--ease)",
+                background: i <= current ? "var(--accent)" : "var(--surface)",
+                color: i <= current ? "#fff" : "var(--text-quaternary)",
+                border: i <= current ? "none" : "1.5px solid var(--border)",
+              }}>
+                {i < current ? "✓" : i + 1}
+              </div>
+              <span style={{ fontSize: 14, fontWeight: i === current ? 600 : 400, color: i <= current ? "var(--text-primary)" : "var(--text-quaternary)", whiteSpace: "nowrap", transition: "all .3s" }}>{l}</span>
             </div>
-            <span style={{ fontSize: 14, fontWeight: i === current ? 600 : 400, color: i <= current ? "var(--text-primary)" : "var(--text-quaternary)", whiteSpace: "nowrap", transition: "all .3s" }}>{l}</span>
+            {i < labels.length - 1 && (
+              <div style={{ flex: 1, height: 2, background: "var(--border)", margin: "15px 8px 0", borderRadius: 1, position: "relative", overflow: "hidden" }}>
+                <div style={{ position: "absolute", left: 0, top: 0, height: "100%", borderRadius: 1, background: "var(--accent)", transition: "width .5s var(--ease)", width: i < current ? "100%" : "0%" }} />
+              </div>
+            )}
           </div>
-          {i < labels.length - 1 && (
-            <div style={{ flex: 1, height: 2, background: "var(--border)", margin: "15px 8px 0", borderRadius: 1, position: "relative", overflow: "hidden" }}>
-              <div style={{ position: "absolute", left: 0, top: 0, height: "100%", borderRadius: 1, background: "var(--accent)", transition: "width .5s var(--ease)", width: i < current ? "100%" : "0%" }} />
-            </div>
-          )}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
 /* ── Rating control ── */
-function RatingControl({ value, onChange, negative }) {
+function RatingControl({ value, onChange, negative, label }) {
   return (
-    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+    <div role="group" aria-label={label} style={{ display: "flex", gap: 6, alignItems: "center" }}>
       {[1, 2, 3, 4, 5].map(v => {
         const active = v === value;
         const filled = value > 0 && v <= value;
         return (
-          <button key={v} onClick={() => onChange(active ? 0 : v)} style={{
+          <button key={v} aria-pressed={active} aria-label={`${label}: ${v}`} onClick={() => onChange(active ? 0 : v)} style={{
             width: 48, height: 36, borderRadius: 8, border: "1.5px solid",
             borderColor: active ? (negative ? "var(--caution)" : "var(--accent)") : filled ? (negative ? "var(--caution-border)" : "rgba(37,99,235,.35)") : "var(--border)",
             background: active ? (negative ? "var(--caution-bg)" : "var(--accent-light)") : filled ? (negative ? "rgba(175,138,78,.03)" : "var(--accent-lighter)") : "transparent",
@@ -453,17 +425,49 @@ function RatingControl({ value, onChange, negative }) {
   );
 }
 
-/* ── Info tooltip ── */
-function InfoTip({ text }) {
+/* ── Info tooltip ──
+   Same look as before. Fixes: tapping now opens it on phones (hover + click used to cancel each
+   other out), it is centred on the "i" as intended, and it is nudged to stay inside the screen. */
+function InfoTip({ text, onOpen }) {
   const [show, setShow] = useState(false);
+  const [dx, setDx] = useState(0);
+  const wrapRef = useRef(null);
+  const boxRef = useRef(null);
+  const pointer = useRef("mouse");
+
+  const open = () => { if (!show) onOpen?.(); setShow(true); };
+  const hide = () => { setShow(false); setDx(0); };
+
+  useLayoutEffect(() => {
+    if (!show || !boxRef.current) return;
+    const r = boxRef.current.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth; // not innerWidth: on phones it grows when content overflows
+    const pad = 12;
+    if (r.left < pad) setDx(pad - r.left);
+    else if (r.right > vw - pad) setDx(vw - pad - r.right);
+  }, [show]);
+
+  useEffect(() => {
+    if (!show) return;
+    const onDown = (e) => { if (!wrapRef.current?.contains(e.target)) { setShow(false); setDx(0); } };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [show]);
+
   return (
-    <span style={{ position: "relative", display: "inline-flex" }}>
-      <span onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)} onClick={() => setShow(!show)}
+    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
+      <span
+        onPointerDown={e => { pointer.current = e.pointerType; }}
+        onPointerEnter={e => { if (e.pointerType === "mouse") open(); }}
+        onPointerLeave={e => { if (e.pointerType === "mouse") hide(); }}
+        onClick={() => { if (pointer.current === "mouse") open(); else if (show) hide(); else open(); }}
         style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: "50%", fontSize: 12, fontWeight: 600, color: "var(--text-tertiary)", border: "1px solid var(--border)", cursor: "help", userSelect: "none", marginLeft: 5, background: show ? "var(--fill-secondary)" : "transparent", transition: "all .15s" }}>i</span>
       {show && (
-        <div className="anim-scale" style={{ position: "absolute", bottom: "calc(100% + 10px)", left: "50%", transform: "translateX(-50%)", background: "var(--surface)", padding: "14px 18px", borderRadius: "var(--radius-xs)", boxShadow: "var(--shadow-lg)", border: "1px solid var(--border)", fontSize: 14, lineHeight: 1.65, width: 300, zIndex: 200, color: "var(--text-secondary)" }}>
-          {text}
-          <div style={{ position: "absolute", bottom: -5, left: "50%", transform: "translateX(-50%) rotate(45deg)", width: 10, height: 10, background: "var(--surface)", border: "1px solid var(--border)", borderTop: "none", borderLeft: "none" }} />
+        <div ref={boxRef} style={{ position: "absolute", bottom: "calc(100% + 10px)", left: "50%", transform: `translateX(calc(-50% + ${dx}px))`, width: "min(300px, calc(100vw - 24px))", zIndex: 200 }}>
+          <div className="anim-scale" style={{ background: "var(--surface)", padding: "14px 18px", borderRadius: "var(--radius-xs)", boxShadow: "var(--shadow-lg)", border: "1px solid var(--border)", fontSize: 14, lineHeight: 1.65, color: "var(--text-secondary)" }}>
+            {text}
+          </div>
+          <div style={{ position: "absolute", bottom: -5, left: `calc(50% - ${dx}px)`, transform: "translateX(-50%) rotate(45deg)", width: 10, height: 10, background: "var(--surface)", border: "1px solid var(--border)", borderTop: "none", borderLeft: "none" }} />
         </div>
       )}
     </span>
@@ -494,20 +498,33 @@ function ContribBar({ item, maxAbs, lang }) {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 export default function Choosely() {
-  const [lang, setLang] = useState("en");
+  const [init] = useState(loadInitial);
+  const [lang, setLang] = useState(init.lang);
   const t = i18n[lang];
   const dn = (d) => lang === "zh" ? d.zh : d.en;
   const dd = (d) => lang === "zh" ? d.descZh : d.descEn;
   const optTitle = (o) => lang === "zh" ? (o.titleZh || o.title) : o.title;
   const optDesc = (o) => lang === "zh" ? (o.descZh || o.desc) : o.desc;
 
-  const [step, setStep] = useState(0);
-  const [options, setOptions] = useState(DEMO);
-  const [weights, setWeights] = useState(DEFAULT_WEIGHTS);
+  const [step, setStep] = useState(init.step);
+  const [options, setOptions] = useState(init.options);
+  const [weights, setWeights] = useState(init.weights);
   const [expanded, setExpanded] = useState(null);
-  const [ratingTab, setRatingTab] = useState(0);
+  const [ratingTab, setRatingTab] = useState(init.ratingTab);
+  const [blocked, setBlocked] = useState(null); // shown briefly after Continue is tapped while not allowed
+  const [nudge, setNudge] = useState(null);     // highlights the unrated rows of one option
+  const [focusId, setFocusId] = useState(null);
+
+  const tabsRef = useRef(null);
+  const optionsRef = useRef(options);
+  const maxStepRef = useRef(0);
+  const trackedStep = useRef(null);
+  const weightsTouched = useRef(false);
+  const ratedAny = useRef(init.options.some(o => Object.values(o.ratings).some(v => v > 0)));
+  const firstScroll = useRef(true);
 
   const wTotal = useMemo(() => Object.values(weights).reduce((a, b) => a + b, 0), [weights]);
+  const shares = useMemo(() => weightShares(weights), [weights]);
   const results = useMemo(() => rankOpts(options, weights), [options, weights]);
 
   const allRated = useMemo(() => options.every(o => Object.values(o.ratings).every(r => r > 0)), [options]);
@@ -517,16 +534,143 @@ export default function Choosely() {
     return { total, done };
   }, [options]);
 
-  const canNext = step === 0 ? options.length >= 2 && options.every(o => o.title.trim()) : step === 1 ? allRated : true;
+  const missingTitles = options.filter(o => !o.title.trim()).length;
+  // Why Continue is disabled right now (null = allowed).
+  const block = step === 0 && missingTitles ? { key: "nameMore", reason: "unnamed", missing: missingTitles }
+    : step === 1 && !allRated ? { key: "rateMore", reason: "unrated", missing: ratedCount.total - ratedCount.done }
+    : step === 2 && !(wTotal > 0) ? { key: "weightNone", reason: "no_weight", missing: 0 }
+    : null;
+  const canNext = !block;
+  const maxStep = reachableStep(options, weights);
+  const tie = results.length > 1 && results[1].rank === 1;
 
-  const addOpt = useCallback(() => setOptions(p => [...p, { id: Date.now().toString(), title: "", titleZh: "", desc: "", descZh: "", ratings: { ...EMPTY_RATINGS } }]), []);
-  const updOpt = useCallback((id, f, v) => setOptions(p => p.map(o => o.id === id ? { ...o, [f]: v } : o)), []);
-  const updRate = useCallback((oid, did, v) => setOptions(p => p.map(o => o.id === oid ? { ...o, ratings: { ...o.ratings, [did]: v } } : o)), []);
-  const rmOpt = useCallback(id => setOptions(p => p.filter(o => o.id !== id)), []);
+  // Editing a name/description writes both language fields, so what you typed survives a language
+  // switch (and a name typed in Chinese mode counts as named). Untouched demo options still translate.
+  const updOpt = useCallback((id, f, v) => setOptions(p => p.map(o => o.id === id ? { ...o, ...(f === "title" ? { title: v, titleZh: v } : { desc: v, descZh: v }) } : o)), []);
+  const addOpt = () => {
+    const id = Date.now().toString();
+    setOptions(p => [...p, { id, title: "", titleZh: "", desc: "", descZh: "", ratings: { ...EMPTY_RATINGS } }]);
+    setFocusId(id);
+    track("option_added", { options_count: options.length + 1 });
+  };
+  const rmOpt = (id) => {
+    setOptions(p => p.filter(o => o.id !== id));
+    track("option_removed", { options_count: options.length - 1 });
+  };
+  const updRate = (oid, did, v) => {
+    const cur = optionsRef.current;
+    const idx = cur.findIndex(o => o.id === oid);
+    if (idx === -1) return;
+    const before = cur[idx];
+    const after = { ...before, ratings: { ...before.ratings, [did]: v } };
+    const next = cur.map(o => o.id === oid ? after : o);
+    optionsRef.current = next;
+    setOptions(next);
+    if (!ratedAny.current && v > 0) {
+      ratedAny.current = true;
+      track("rating_started", { options_count: next.length });
+    }
+    if (!isComplete(before) && isComplete(after)) {
+      const done = next.filter(isComplete).length;
+      track("option_rated", { option_index: idx, completed_options: done, total_options: next.length });
+      if (done === next.length) track("ratings_completed", { options_count: next.length });
+    }
+  };
+  const setWeight = (id, v) => {
+    setWeights(p => ({ ...p, [id]: v }));
+    if (!weightsTouched.current) {
+      weightsTouched.current = true;
+      track("weights_adjusted", { dimension: id });
+    }
+  };
+
+  /* ── navigation: every step change is a browser-history entry, so the phone's Back button works ── */
+  const applyStep = useCallback((n) => {
+    setStep(n);
+    setBlocked(null);
+    setFocusId(null);
+  }, []);
+  const goStep = useCallback((n) => {
+    window.history.pushState({ step: n }, "");
+    applyStep(n);
+  }, [applyStep]);
+
+  useEffect(() => { optionsRef.current = options; maxStepRef.current = maxStep; });
+
+  useEffect(() => {
+    window.history.replaceState({ step: init.step }, "");
+    const onPop = (e) => {
+      if (typeof e.state?.step === "number") applyStep(Math.min(e.state.step, maxStepRef.current));
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [init.step, applyStep]);
+
+  // A new step starts at the top of the page instead of wherever the last one was scrolled to.
+  useEffect(() => {
+    if (firstScroll.current) { firstScroll.current = false; return; }
+    window.scrollTo(0, 0);
+  }, [step]);
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ options, weights, step, ratingTab, lang })); } catch { /* storage unavailable */ }
+  }, [options, weights, step, ratingTab, lang]);
+
+  useEffect(() => {
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    setContext({ lang });
+  }, [lang]);
 
   useEffect(() => { if (ratingTab >= options.length) setRatingTab(Math.max(0, options.length - 1)); }, [options.length, ratingTab]);
 
-  const nav = (dir) => { if (dir > 0 && step < 3) setStep(s => s + 1); if (dir < 0 && step > 0) setStep(s => s - 1); };
+  useEffect(() => {
+    if (!blocked) return;
+    const id = setTimeout(() => setBlocked(null), 3500);
+    return () => clearTimeout(id);
+  }, [blocked]);
+
+  useEffect(() => {
+    if (!nudge) return;
+    document.querySelector(".row-nudge")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const id = setTimeout(() => setNudge(null), 1600);
+    return () => clearTimeout(id);
+  }, [nudge]);
+
+  /* ── analytics: funnel (which step people reach) ── */
+  useEffect(() => {
+    if (trackedStep.current === step) return;
+    const restored = trackedStep.current === null && init.step > 0;
+    trackedStep.current = step;
+    weightsTouched.current = false;
+    setContext({ step: STEP_KEYS[step] });
+    track("step_viewed", { step: STEP_KEYS[step], step_index: step, options_count: options.length, restored });
+    if (step === 3) {
+      track("results_viewed", {
+        options_count: options.length,
+        margin: results.length > 1 ? +(results[0].score.total - results[1].score.total).toFixed(2) : null,
+        tie,
+        weights_customized: !Object.values(weights).every(w => w === 12.5),
+      });
+    }
+  }, [step, init.step, options.length, results, tie, weights]);
+
+  const selectTab = (i) => {
+    setRatingTab(i);
+    const el = tabsRef.current;
+    if (el && el.getBoundingClientRect().top < 0) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const onContinue = () => {
+    if (canNext) { if (step < 3) goStep(step + 1); return; }
+    track("continue_blocked", { step: STEP_KEYS[step], reason: block.reason, missing: block.missing });
+    setBlocked({ ...block, at: Date.now() });
+    if (step === 0) {
+      document.querySelector("[data-blank-title]")?.focus();
+    } else if (step === 1) {
+      const idx = isComplete(options[ratingTab]) ? options.findIndex(o => !isComplete(o)) : ratingTab;
+      if (idx !== -1) { setRatingTab(idx); setNudge({ optId: options[idx].id, at: Date.now() }); }
+    }
+  };
 
   // For options step: use both title fields based on lang
   const titleField = lang === "zh" ? "titleZh" : "title";
@@ -540,7 +684,7 @@ export default function Choosely() {
         {/* ── Header + Language Toggle ── */}
         <header style={{ textAlign: "center", marginBottom: 36, position: "relative" }}>
           {/* Language switch */}
-          <button onClick={() => setLang(l => l === "en" ? "zh" : "en")} style={{
+          <button onClick={() => { const to = lang === "en" ? "zh" : "en"; setLang(to); track("lang_switched", { to }); }} style={{
             position: "absolute", top: 0, right: 0,
             padding: "6px 16px", borderRadius: 20, fontSize: 14, fontWeight: 600,
             border: "1.5px solid var(--border)", background: "var(--surface)",
@@ -561,7 +705,8 @@ export default function Choosely() {
           <p style={{ fontSize: 16, color: "var(--text-tertiary)", fontWeight: 400 }}>{t.tagline[step]}</p>
         </header>
 
-        <StepBar current={step} labels={t.stepLabels} />
+        <StepBar current={step} labels={t.stepLabels} maxStep={maxStep}
+          onSelect={(i) => { track("step_jump", { from: STEP_KEYS[step], to: STEP_KEYS[i] }); goStep(i); }} />
 
         {/* ═══════════════════════════════════════════════════════════════
             STEP 0 — OPTIONS
@@ -578,14 +723,17 @@ export default function Choosely() {
                   <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
                     <span style={{ fontSize: 21, fontWeight: 300, color: "var(--text-quaternary)", paddingTop: 1, fontVariantNumeric: "tabular-nums", minWidth: 20, textAlign: "center" }}>{i + 1}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <input value={opt[titleField]} onChange={e => updOpt(opt.id, titleField, e.target.value)} placeholder={t.optionPlaceholder}
+                      <input value={opt[titleField]} onChange={e => updOpt(opt.id, "title", e.target.value)} placeholder={t.optionPlaceholder}
+                        aria-label={`${t.optionPlaceholder} ${i + 1}`} autoFocus={opt.id === focusId}
+                        data-blank-title={opt.title.trim() ? undefined : ""}
                         style={{ width: "100%", border: "none", fontSize: 18, fontWeight: 600, background: "transparent", fontFamily: "var(--font)", color: "var(--text-primary)", marginBottom: 6, letterSpacing: "-.01em" }} />
-                      <input value={opt[descField]} onChange={e => updOpt(opt.id, descField, e.target.value)} placeholder={t.descPlaceholder}
+                      <input value={opt[descField]} onChange={e => updOpt(opt.id, "desc", e.target.value)} placeholder={t.descPlaceholder}
+                        aria-label={`${t.descPlaceholder} ${i + 1}`}
                         style={{ width: "100%", border: "none", fontSize: 15, background: "transparent", fontFamily: "var(--font)", color: "var(--text-tertiary)" }} />
                     </div>
                     <div style={{ display: "flex", alignItems: "center", flexShrink: 0, paddingTop: 4 }}>
                       {options.length > 2 && (
-                        <button onClick={() => rmOpt(opt.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-quaternary)", fontSize: 22, lineHeight: 1, padding: 0, transition: "color .15s" }}
+                        <button onClick={() => rmOpt(opt.id)} aria-label={`Remove option ${i + 1}`} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-quaternary)", fontSize: 22, lineHeight: 1, padding: 0, transition: "color .15s" }}
                           onMouseEnter={e => e.currentTarget.style.color = "var(--text-secondary)"}
                           onMouseLeave={e => e.currentTarget.style.color = "var(--text-quaternary)"}
                         >×</button>
@@ -617,13 +765,13 @@ export default function Choosely() {
             </div>
 
             {/* Option tabs */}
-            <div className="option-tabs">
+            <div className="option-tabs" ref={tabsRef}>
               {options.map((opt, i) => {
                 const done = Object.values(opt.ratings).filter(r => r > 0).length;
                 const total = DIMENSIONS.length;
                 const complete = done === total;
                 return (
-                  <button key={opt.id} onClick={() => setRatingTab(i)} style={{
+                  <button key={opt.id} onClick={() => setRatingTab(i)} aria-current={ratingTab === i} style={{
                     padding: "8px 18px", borderRadius: 20, fontSize: 15, fontWeight: ratingTab === i ? 600 : 400,
                     border: "1.5px solid", cursor: "pointer", fontFamily: "var(--font)", transition: "all .2s var(--ease)",
                     borderColor: ratingTab === i ? "var(--accent)" : complete ? "rgba(22,163,74,.22)" : "var(--border)",
@@ -631,7 +779,7 @@ export default function Choosely() {
                     color: ratingTab === i ? "var(--accent)" : complete ? "var(--positive)" : "var(--text-secondary)",
                     display: "flex", alignItems: "center", gap: 6,
                   }}>
-                    {optTitle(opt) || `${t.optionProgress} ${i + 1}`}
+                    <span className="ph-mask">{optTitle(opt) || `${t.optionProgress} ${i + 1}`}</span>
                     {complete && <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5L5 9L9.5 3.5" stroke="var(--positive)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                     {!complete && done > 0 && <span style={{ fontSize: 14, color: "var(--text-quaternary)" }}>{done}/{total}</span>}
                   </button>
@@ -643,13 +791,13 @@ export default function Choosely() {
             {options[ratingTab] && (
               <Card key={options[ratingTab].id} className="anim-scale" style={{ padding: 0, overflow: "hidden" }}>
                 <div style={{ padding: "16px 22px 14px", borderBottom: "1px solid var(--border)" }}>
-                  <div style={{ fontSize: 21, fontWeight: 600, letterSpacing: "-.01em" }}>{optTitle(options[ratingTab]) || (lang === "zh" ? "未命名选项" : "Untitled option")}</div>
-                  <div style={{ fontSize: 15, color: "var(--text-tertiary)", marginTop: 4 }}>{optDesc(options[ratingTab])}</div>
+                  <div className="ph-mask" style={{ fontSize: 21, fontWeight: 600, letterSpacing: "-.01em" }}>{optTitle(options[ratingTab]) || (lang === "zh" ? "未命名选项" : "Untitled option")}</div>
+                  <div className="ph-mask" style={{ fontSize: 15, color: "var(--text-tertiary)", marginTop: 4 }}>{optDesc(options[ratingTab])}</div>
                 </div>
                 <div style={{ padding: "16px 22px 22px" }}>
                   <div className="rating-dimensions">
                     {DIMENSIONS.map(dim => (
-                      <div key={dim.id}>
+                      <div key={dim.id} className={nudge?.optId === options[ratingTab].id && options[ratingTab].ratings[dim.id] === 0 ? "row-nudge" : undefined}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                           <div style={{ display: "flex", alignItems: "center" }}>
                             <span style={{ fontSize: 15, fontWeight: 500, color: dim.negative ? "var(--caution)" : "var(--text-primary)" }}>{dn(dim)}</span>
@@ -661,7 +809,7 @@ export default function Choosely() {
                         <div style={{ fontSize: 14, color: "var(--text-tertiary)", marginBottom: 8, lineHeight: 1.55 }}>
                           {dd(dim)}
                         </div>
-                        <RatingControl value={options[ratingTab].ratings[dim.id]} onChange={v => updRate(options[ratingTab].id, dim.id, v)} negative={dim.negative} />
+                        <RatingControl value={options[ratingTab].ratings[dim.id]} onChange={v => updRate(options[ratingTab].id, dim.id, v)} negative={dim.negative} label={dn(dim)} />
                       </div>
                     ))}
                   </div>
@@ -675,8 +823,8 @@ export default function Choosely() {
                     </span>
                   </div>
                   <div style={{ display: "flex", gap: 4 }}>
-                    {ratingTab > 0 && <button onClick={() => setRatingTab(r => r - 1)} style={{ padding: "5px 14px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-secondary)", fontSize: 14, cursor: "pointer", fontFamily: "var(--font)", fontWeight: 500 }}>{t.prev}</button>}
-                    {ratingTab < options.length - 1 && <button onClick={() => setRatingTab(r => r + 1)} style={{ padding: "5px 14px", borderRadius: 6, border: "none", background: "var(--accent)", color: "#fff", fontSize: 14, cursor: "pointer", fontFamily: "var(--font)", fontWeight: 500 }}>{t.next}</button>}
+                    {ratingTab > 0 && <button onClick={() => selectTab(ratingTab - 1)} style={{ padding: "5px 14px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-secondary)", fontSize: 14, cursor: "pointer", fontFamily: "var(--font)", fontWeight: 500 }}>{t.prev}</button>}
+                    {ratingTab < options.length - 1 && <button onClick={() => selectTab(ratingTab + 1)} style={{ padding: "5px 14px", borderRadius: 6, border: "none", background: "var(--accent)", color: "#fff", fontSize: 14, cursor: "pointer", fontFamily: "var(--font)", fontWeight: 500 }}>{t.next}</button>}
                   </div>
                 </div>
               </Card>
@@ -696,8 +844,9 @@ export default function Choosely() {
                   <div style={{ fontSize: 15, color: "var(--text-secondary)" }}>{t.weightsSubtitle}</div>
                 </div>
                 <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 34, fontWeight: 300, fontVariantNumeric: "tabular-nums", color: Math.abs(wTotal - 100) < 1 ? "var(--text-primary)" : "var(--caution)", letterSpacing: "-.02em" }}>{wTotal.toFixed(0)}</div>
-                  <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>/ 100 {t.weightTotal}</div>
+                  {/* Weights are relative, so the shares below always make up 100% */}
+                  <div style={{ fontSize: 34, fontWeight: 300, fontVariantNumeric: "tabular-nums", color: wTotal > 0 ? "var(--text-primary)" : "var(--caution)", letterSpacing: "-.02em" }}>{wTotal > 0 ? "100%" : "0%"}</div>
+                  <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>{t.weightTotal}</div>
                 </div>
               </div>
               <div className="weights-list">
@@ -707,16 +856,16 @@ export default function Choosely() {
                       <div style={{ display: "flex", alignItems: "center" }}>
                         <span style={{ fontSize: 15, fontWeight: 500 }}>{dn(dim)}</span>
                         <span style={{ fontSize: 13, color: "var(--text-quaternary)", marginLeft: 6 }}>{lang === "zh" ? dim.en : dim.zh}</span>
-                        <InfoTip text={dd(dim)} />
+                        <InfoTip text={dd(dim)} onOpen={() => track("tip_opened", { dimension: dim.id })} />
                       </div>
-                      <span style={{ fontSize: 16, fontWeight: 600, fontVariantNumeric: "tabular-nums", color: weights[dim.id] > 0 ? "var(--text-primary)" : "var(--text-quaternary)", minWidth: 42, textAlign: "right" }}>{weights[dim.id].toFixed(1)}</span>
+                      <span style={{ fontSize: 16, fontWeight: 600, fontVariantNumeric: "tabular-nums", color: weights[dim.id] > 0 ? "var(--text-primary)" : "var(--text-quaternary)", minWidth: 42, textAlign: "right" }}>{shares[dim.id].toFixed(1)}%</span>
                     </div>
-                    <input type="range" min={0} max={50} step={0.5} value={weights[dim.id]} onChange={e => setWeights(p => ({ ...p, [dim.id]: +e.target.value }))} style={{ width: "100%" }} />
+                    <input type="range" min={0} max={50} step={0.5} value={weights[dim.id]} aria-label={dn(dim)} onChange={e => setWeight(dim.id, +e.target.value)} style={{ width: "100%" }} />
                   </div>
                 ))}
               </div>
               <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
-                <button onClick={() => setWeights(DEFAULT_WEIGHTS)} style={{ padding: "8px 16px", borderRadius: "var(--radius-xs)", border: "none", background: "var(--fill-secondary)", color: "var(--text-tertiary)", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "var(--font)", transition: "all .15s" }}
+                <button onClick={() => { setWeights(DEFAULT_WEIGHTS); track("weights_reset"); }} style={{ padding: "8px 16px", borderRadius: "var(--radius-xs)", border: "none", background: "var(--fill-secondary)", color: "var(--text-tertiary)", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "var(--font)", transition: "all .15s" }}
                   onMouseEnter={e => e.currentTarget.style.color = "var(--text-secondary)"}
                   onMouseLeave={e => e.currentTarget.style.color = "var(--text-tertiary)"}
                 >{t.resetWeights}</button>
@@ -746,7 +895,7 @@ export default function Choosely() {
                   return (
                     <div key={opt.id} style={{ display: "flex", alignItems: "center", gap: 14 }}>
                       <span style={{ width: 20, fontSize: 16, fontWeight: isFirst ? 600 : 400, color: isFirst ? "var(--accent)" : "var(--text-quaternary)", textAlign: "center" }}>{opt.rank}</span>
-                      <span style={{ width: 128, fontSize: 15, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{optTitle(opt)}</span>
+                      <span className="ph-mask" style={{ width: 128, fontSize: 15, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{optTitle(opt)}</span>
                       <div style={{ flex: 1, height: 6, background: "var(--border)", borderRadius: 3, overflow: "hidden" }}>
                         <div style={{ height: "100%", borderRadius: 3, transition: "width .8s var(--ease)", width: `${Math.max(pct, 3)}%`, background: isFirst ? "var(--accent)" : "var(--text-quaternary)" }} />
                       </div>
@@ -761,22 +910,22 @@ export default function Choosely() {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {results.map((opt, ri) => {
                 const maxAbs = Math.max(...opt.score.breakdown.map(b => Math.abs(b.contribution)), 0.1);
-                const isTop = ri === 0;
+                const isTop = ri === 0 && !tie; // a tie for first has no single "Top pick"
                 const isOpen = expanded === opt.id;
                 return (
                   <Card key={opt.id} className="anim-fade" style={{
                     animationDelay: `${ri * 60}ms`, overflow: "hidden",
                     ...(isTop ? { border: "1.5px solid var(--accent)", boxShadow: "0 0 0 1px rgba(37,99,235,.2), var(--shadow-lg)" } : {}),
                   }}>
-                    <div onClick={() => setExpanded(isOpen ? null : opt.id)} style={{ padding: "16px 20px", cursor: "pointer", userSelect: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div onClick={() => { setExpanded(isOpen ? null : opt.id); if (!isOpen) track("result_expanded", { rank: opt.rank }); }} style={{ padding: "16px 20px", cursor: "pointer", userSelect: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
                         <div style={{ width: 40, height: 40, borderRadius: "var(--radius-xs)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 600, flexShrink: 0, background: isTop ? "var(--accent)" : "var(--fill-secondary)", color: isTop ? "#fff" : "var(--text-tertiary)" }}>#{opt.rank}</div>
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 17, fontWeight: 600, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                            {optTitle(opt)}
+                            <span className="ph-mask">{optTitle(opt)}</span>
                             {isTop && <span style={{ fontSize: 14, fontWeight: 600, color: "var(--accent)", background: "var(--accent-light)", padding: "2px 10px", borderRadius: 10 }}>{t.recommended}</span>}
                           </div>
-                          <div style={{ fontSize: 14, color: "var(--text-tertiary)", marginTop: 3 }}>{optDesc(opt)}</div>
+                          <div className="ph-mask" style={{ fontSize: 14, color: "var(--text-tertiary)", marginTop: 3 }}>{optDesc(opt)}</div>
                         </div>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 16, flexShrink: 0 }}>
@@ -825,8 +974,13 @@ export default function Choosely() {
         )}
 
         {/* ── Navigation ── */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 36 }}>
-          <button onClick={() => nav(-1)} disabled={step === 0} style={{
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 36, position: "relative" }}>
+          {blocked && block && (
+            <div key={blocked.at} role="status" className="anim-fade" style={{ position: "absolute", right: 0, bottom: "calc(100% + 10px)", fontSize: 14, fontWeight: 500, color: "var(--caution)", whiteSpace: "nowrap" }}>
+              {t[block.key](block.missing)}
+            </div>
+          )}
+          <button onClick={() => goStep(step - 1)} disabled={step === 0} style={{
             padding: "12px 28px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)",
             background: "var(--surface)", color: step === 0 ? "var(--text-quaternary)" : "var(--text-secondary)",
             fontSize: 16, fontWeight: 500, cursor: step === 0 ? "default" : "pointer",
@@ -834,7 +988,7 @@ export default function Choosely() {
           }}>{t.prevStep}</button>
 
           {step < 3 ? (
-            <button onClick={() => canNext && nav(1)} style={{
+            <button onClick={onContinue} aria-disabled={!canNext} style={{
               padding: "12px 32px", borderRadius: "var(--radius-sm)", border: "none",
               background: canNext ? "var(--accent)" : "var(--text-quaternary)",
               color: "#fff", fontSize: 16, fontWeight: 600, cursor: canNext ? "pointer" : "default",
@@ -845,13 +999,17 @@ export default function Choosely() {
             onMouseLeave={e => { e.currentTarget.style.transform = "none"; }}
             >{t.nextStep}</button>
           ) : (
-            <button onClick={() => { setStep(0); setExpanded(null); }} style={{
+            <button onClick={() => { track("restart", { options_count: options.length }); goStep(0); setExpanded(null); }} style={{
               padding: "12px 28px", borderRadius: "var(--radius-sm)", border: "none",
               background: "var(--accent)", color: "#fff", fontSize: 16, fontWeight: 600,
               cursor: "pointer", fontFamily: "var(--font)", boxShadow: "0 2px 12px rgba(37,99,235,.35)",
             }}>{t.restart}</button>
           )}
         </div>
+
+        {step === 0 && (
+          <p style={{ marginTop: 28, textAlign: "center", fontSize: 13, lineHeight: 1.6, color: "var(--text-quaternary)" }}>{t.privacy}</p>
+        )}
       </div>
     </div>
   );
