@@ -159,6 +159,51 @@ function genSummary(opt, s, lang) {
   return `Overall score is low${neg ? ` — ${neg} is the main drag` : ""}. Consider carefully.`;
 }
 
+/* Research behind the method. Every entry is a real, citable source; links go to the DOI or publisher. */
+const REFERENCES = [
+  {
+    cite: "Franklin, B. (1772). Letter to Joseph Priestley, 19 September.",
+    en: "“Moral algebra”: list pros and cons, weigh them, strike out equals. The oldest written version of what Choosely does.",
+    zh: "“道德代数”：列出利弊、赋予权重、相互抵消。这是 Choosely 方法最早的文字记载。",
+  },
+  {
+    cite: "Keeney, R. L., & Raiffa, H. (1976). Decisions with Multiple Objectives: Preferences and Value Tradeoffs. Wiley.",
+    url: "https://doi.org/10.1017/CBO9781139174084",
+    en: "Multi-attribute utility theory: score each option on separate dimensions, weight them, then add. The formal basis for steps 2 to 4.",
+    zh: "多属性效用理论：在不同维度上分别打分、加权、再求和。这是第 2 到第 4 步的理论基础。",
+  },
+  {
+    cite: "Dawes, R. M. (1979). The robust beauty of improper linear models in decision making. American Psychologist, 34(7), 571–582.",
+    url: "https://doi.org/10.1037/0003-066X.34.7.571",
+    en: "Even simple weighted sums of a few ratings tend to predict outcomes better than unaided intuition.",
+    zh: "即使只是把几项评分简单加权求和，预测效果通常也优于单凭直觉。",
+  },
+  {
+    cite: "Kahneman, D., Sibony, O., & Sunstein, C. R. (2021). Noise: A Flaw in Human Judgment. Little, Brown Spark.",
+    url: "https://www.littlebrown.com/titles/daniel-kahneman/noise/9780316451390/",
+    en: "Rate each dimension separately and delay the overall verdict. This cuts noise and keeps one impression from coloring everything.",
+    zh: "把每个维度分开评估、推迟整体判断，可以减少判断中的噪声，避免第一印象左右全部打分。",
+  },
+  {
+    cite: "Kahneman, D., & Tversky, A. (1979). Prospect theory: An analysis of decision under risk. Econometrica, 47(2), 263–291.",
+    url: "https://doi.org/10.2307/1914185",
+    en: "Losses weigh more than equal gains. Why Risk and Effort count against an option, not just a missing plus.",
+    zh: "同等大小的损失比收益更让人在意。这也是“风险”和“投入成本”被计为扣分项的原因。",
+  },
+  {
+    cite: "Gilbert, D. T., & Ebert, J. E. J. (2002). Decisions and revisions: The affective forecasting of changeable outcomes. Journal of Personality and Social Psychology, 82(4), 503–514.",
+    url: "https://doi.org/10.1037/0022-3514.82.4.503",
+    en: "People prefer reversible choices but end up less satisfied with them. Optionality is worth weighing on purpose.",
+    zh: "人们偏好可以反悔的选择，但事后对它们反而更不满意。所以“可逆性”值得被单独、有意识地衡量。",
+  },
+  {
+    cite: "Iyengar, S. S., & Lepper, M. R. (2000). When choice is demotivating: Can one desire too much of a good thing? Journal of Personality and Social Psychology, 79(6), 995–1006.",
+    url: "https://doi.org/10.1037/0022-3514.79.6.995",
+    en: "More options can make choosing harder and less satisfying. Narrow the list before you compare.",
+    zh: "选项越多，选择往往越难、满意度越低。先缩小范围，再做比较。",
+  },
+];
+
 /* ═══════════════════════════════════════════════════════════════════════════
    STYLES
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -167,38 +212,49 @@ function genSummary(opt, s, lang) {
 const GLOBAL_CSS = `
 *{box-sizing:border-box;margin:0;padding:0}
 :root {
-  --bg: #FFFFFF;
+  --paper: #FFFFFF;
+  --ink: #1D1D1F;
+  --bg: #F5F5F7;
   --surface: #FFFFFF;
-  --fill-secondary: #F3F4F6;
-  --border: #E5E7EB;
-  --border-hover: #2563EB;
-  --text-primary: #111827;
-  --text-heading: #020617;
-  --text-secondary: #4B5563;
-  --text-tertiary: #6B7280;
-  --text-quaternary: #9CA3AF;
-  --accent: #2563EB;
-  --accent-light: rgba(37,99,235,.14);
-  --accent-lighter: rgba(37,99,235,.08);
-  --positive: #16A34A;
-  --positive-bg: rgba(22,163,74,.1);
-  --caution: #CA8A04;
-  --caution-bg: rgba(202,138,4,.1);
-  --caution-border: rgba(202,138,4,.28);
-  --shadow-md: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
-  --shadow-lg: 0 12px 40px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05);
-  --radius: 16px; --radius-sm: 10px; --radius-xs: 8px;
-  --font: 'Inter', 'Noto Sans SC', -apple-system, sans-serif;
+  --glass: blur(22px) saturate(160%);
+  --backdrop: #F5F5F7;
+  --fill-secondary: rgba(29,29,31,.05);
+  --border: rgba(0,0,0,.06);
+  --border-hover: rgba(0,0,0,.2);
+  --text-primary: #1D1D1F;
+  --text-heading: #1D1D1F;
+  --text-secondary: #6E6E73;
+  --text-tertiary: #86868B;
+  --text-quaternary: #A1A1A6;
+  --accent: var(--ink);
+  --on-accent: var(--paper);
+  --accent-light: rgba(29,29,31,.08);
+  --accent-lighter: rgba(29,29,31,.035);
+  --accent-border: rgba(29,29,31,.28);
+  --positive: #4F7A5E;
+  --positive-bg: rgba(79,122,94,.08);
+  --positive-border: rgba(79,122,94,.24);
+  --caution: #9C7342;
+  --caution-bg: rgba(156,115,66,.08);
+  --caution-border: rgba(156,115,66,.26);
+  --shadow-md: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.03);
+  --shadow-lg: 0 10px 30px rgba(0,0,0,.08);
+  --radius: 16px; --radius-sm: 999px; --radius-xs: 8px;
+  --font: 'Geist', 'PingFang SC', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
   --ease: cubic-bezier(.4,0,.2,1);
+  color-scheme: light;
 }
-html { font-size: 17px; color-scheme: light; }
+body, #root { background: var(--backdrop) !important; background-attachment: fixed !important; }
+h1, h2, h3 { font-family: var(--font) !important; color: var(--text-heading); }
+html { font-size: 16px; scrollbar-width: none; }
+html::-webkit-scrollbar { display: none; }
 @media (min-width: 900px) {
-  html { font-size: 18px; }
+  html { font-size: 17px; }
 }
-body { font-family: var(--font); background: var(--bg); color: var(--text-primary); -webkit-font-smoothing: antialiased; line-height: 1.55; font-size: 1rem; }
+body { font-family: var(--font); background: var(--bg); color: var(--text-primary); -webkit-font-smoothing: antialiased; line-height: 1.65; font-size: 1rem; font-variant-numeric: tabular-nums; letter-spacing: .01em; text-rendering: optimizeLegibility; }
 input:focus, textarea:focus { outline: none; }
 input[type=range] { -webkit-appearance: none; appearance: none; height: 4px; background: var(--border); border-radius: 2px; outline: none; }
-input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; background: #FFFFFF; cursor: pointer; border: 1px solid var(--border); box-shadow: 0 1px 4px rgba(0,0,0,.12); transition: transform .15s var(--ease), border-color .15s var(--ease); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; background: var(--paper); cursor: pointer; border: 1px solid var(--border-hover); box-shadow: none; transition: transform .15s var(--ease), border-color .15s var(--ease); }
 input[type=range]::-webkit-slider-thumb:hover { border-color: var(--border-hover); transform: scale(1.15); }
 input[type=range]::-webkit-slider-thumb:active { transform: scale(.95); }
 @keyframes fadeUp { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } }
@@ -213,7 +269,7 @@ input[type=range]::-webkit-slider-thumb:active { transform: scale(.95); }
 }
 .app-shell {
   width: 100%;
-  max-width: min(100%, 1200px);
+  max-width: min(100%, 880px);
   margin: 0 auto;
   box-sizing: border-box;
   padding-top: max(clamp(40px, 7vw, 64px), env(safe-area-inset-top, 0px));
@@ -233,65 +289,21 @@ input[type=range]::-webkit-slider-thumb:active { transform: scale(.95); }
     padding-right: max(48px, env(safe-area-inset-right, 0px));
   }
 }
-@media (min-width: 1440px) {
-  .app-shell { max-width: min(100%, 1320px); }
-}
 .options-list {
   display: flex;
   flex-direction: column;
-  gap: clamp(14px, 2vw, 22px);
+  gap: 12px;
 }
 .option-card {
   position: relative;
   border-radius: var(--radius);
-  isolation: isolate;
-  transition:
-    transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.45s cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 0.35s ease,
-    background 0.35s ease;
-  background:
-    linear-gradient(165deg, #FFFFFF 0%, #FAFBFC 55%, #F8FAFC 100%) !important;
+  background: var(--surface) !important;
   border: 1px solid var(--border) !important;
-  box-shadow:
-    0 1px 0 rgba(255,255,255,.9) inset,
-    0 4px 14px rgba(15,23,42,.06),
-    0 1px 2px rgba(15,23,42,.04) !important;
+  box-shadow: var(--shadow-md) !important;
+  transition: border-color .25s ease;
 }
-.option-card::before {
-  content: "";
-  position: absolute;
-  left: 1px;
-  right: 1px;
-  top: 1px;
-  height: 42%;
-  border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
-  background: linear-gradient(180deg, rgba(255,255,255,.95), transparent);
-  pointer-events: none;
-  z-index: 0;
-}
-.option-card > * {
-  position: relative;
-  z-index: 1;
-}
-.option-card:hover {
-  transform: translateY(-3px);
-  border-color: rgba(37,99,235,.35) !important;
-  background:
-    linear-gradient(165deg, #FFFFFF 0%, rgba(37,99,235,.04) 48%, #F8FAFC 100%) !important;
-  box-shadow:
-    0 1px 0 rgba(255,255,255,.95) inset,
-    0 16px 36px rgba(15,23,42,.1),
-    0 0 0 1px rgba(37,99,235,.12),
-    0 0 28px rgba(37,99,235,.1) !important;
-}
-.option-card:hover::before {
-  background: linear-gradient(180deg, rgba(255,255,255,.98), transparent);
-}
-.option-card:active {
-  transform: translateY(-1px);
-  transition-duration: 0.12s;
-}
+.option-card:hover, .option-card:focus-within { border-color: var(--border-hover) !important; }
+.option-tabs button { white-space: nowrap; flex-shrink: 0; }
 .option-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -351,18 +363,28 @@ input[type=range]::-webkit-slider-thumb:active { transform: scale(.95); }
    COMPONENTS
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* Check icon from Lucide (lucide.dev, ISC license): M20 6 9 17l-5-5 */
+function Check({ size = 14, color = "currentColor", strokeWidth = 2 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth}
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: "block", flexShrink: 0 }}>
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
 function Card({ children, style, className = "", surface, ...props }) {
   const base =
     surface === "option"
       ? { borderRadius: "var(--radius)" }
-      : { background: "var(--surface)", borderRadius: "var(--radius)", boxShadow: "var(--shadow-md)", border: "1px solid var(--border)" };
+      : { background: "var(--surface)", borderRadius: "var(--radius)", boxShadow: "var(--shadow-md)", border: "1px solid var(--border)", backdropFilter: "var(--glass)", WebkitBackdropFilter: "var(--glass)" };
   return <div className={className} style={{ ...base, ...style }} {...props}>{children}</div>;
 }
 
 function Pill({ children, caution }) {
   const c = caution
     ? { background: "var(--caution-bg)", color: "var(--caution)", borderColor: "var(--caution-border)" }
-    : { background: "var(--positive-bg)", color: "var(--positive)", borderColor: "rgba(22,163,74,.22)" };
+    : { background: "var(--positive-bg)", color: "var(--positive)", borderColor: "var(--positive-border)" };
   return <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "6px 14px", borderRadius: 20, fontSize: 14, fontWeight: 500, fontFamily: "var(--font)", border: "1px solid", ...c }}>{children}</span>;
 }
 
@@ -377,19 +399,19 @@ function StepBar({ current, labels, maxStep, onSelect }) {
             <div onClick={canJump ? () => onSelect(i) : undefined} role={canJump ? "button" : undefined} aria-current={i === current ? "step" : undefined}
               style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, zIndex: 1, cursor: canJump ? "pointer" : "default" }}>
               <div style={{
-                width: 32, height: 32, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 14, fontWeight: 600, transition: "all .35s var(--ease)",
-                background: i <= current ? "var(--accent)" : "var(--surface)",
-                color: i <= current ? "#fff" : "var(--text-quaternary)",
-                border: i <= current ? "none" : "1.5px solid var(--border)",
+                width: 24, height: 24, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 12.5, fontWeight: 400, transition: "all .35s var(--ease)",
+                background: i === current ? "var(--accent)" : "transparent",
+                color: i === current ? "var(--on-accent)" : i < current ? "var(--text-primary)" : "var(--text-quaternary)",
+                border: i === current ? "1px solid var(--accent)" : i < current ? "1px solid var(--border-hover)" : "1px solid var(--border)",
               }}>
-                {i < current ? "✓" : i + 1}
+                {i < current ? <Check size={13} strokeWidth={2.2} /> : i + 1}
               </div>
-              <span style={{ fontSize: 14, fontWeight: i === current ? 600 : 400, color: i <= current ? "var(--text-primary)" : "var(--text-quaternary)", whiteSpace: "nowrap", transition: "all .3s" }}>{l}</span>
+              <span style={{ fontSize: 14, fontWeight: 400, color: i === current ? "var(--text-primary)" : i < current ? "var(--text-secondary)" : "var(--text-quaternary)", whiteSpace: "nowrap", transition: "all .3s" }}>{l}</span>
             </div>
             {i < labels.length - 1 && (
-              <div style={{ flex: 1, height: 2, background: "var(--border)", margin: "15px 8px 0", borderRadius: 1, position: "relative", overflow: "hidden" }}>
-                <div style={{ position: "absolute", left: 0, top: 0, height: "100%", borderRadius: 1, background: "var(--accent)", transition: "width .5s var(--ease)", width: i < current ? "100%" : "0%" }} />
+              <div style={{ flex: 1, height: 1, background: "var(--border)", margin: "11.5px 10px 0", position: "relative", overflow: "hidden" }}>
+                <div style={{ position: "absolute", left: 0, top: 0, height: "100%", background: "var(--border-hover)", transition: "width .5s var(--ease)", width: i < current ? "100%" : "0%" }} />
               </div>
             )}
           </div>
@@ -409,10 +431,10 @@ function RatingControl({ value, onChange, negative, label }) {
         return (
           <button key={v} aria-pressed={active} aria-label={`${label}: ${v}`} onClick={() => onChange(active ? 0 : v)} style={{
             width: 48, height: 36, borderRadius: 8, border: "1.5px solid",
-            borderColor: active ? (negative ? "var(--caution)" : "var(--accent)") : filled ? (negative ? "var(--caution-border)" : "rgba(37,99,235,.35)") : "var(--border)",
-            background: active ? (negative ? "var(--caution-bg)" : "var(--accent-light)") : filled ? (negative ? "rgba(175,138,78,.03)" : "var(--accent-lighter)") : "transparent",
+            borderColor: active ? (negative ? "var(--caution)" : "var(--accent)") : filled ? (negative ? "var(--caution-border)" : "var(--accent-border)") : "var(--border)",
+            background: active ? (negative ? "var(--caution-bg)" : "var(--accent-light)") : filled ? (negative ? "var(--caution-bg)" : "var(--accent-lighter)") : "transparent",
             color: active ? (negative ? "var(--caution)" : "var(--accent)") : filled ? (negative ? "var(--caution)" : "var(--accent)") : "var(--text-tertiary)",
-            fontSize: 15, fontWeight: active ? 600 : 500, cursor: "pointer",
+            fontSize: 15, fontWeight: active ? 500 : 400, cursor: "pointer",
             transition: "all .2s var(--ease)", fontFamily: "var(--font)",
             transform: active ? "scale(1.05)" : "scale(1)",
           }}
@@ -461,7 +483,7 @@ function InfoTip({ text, onOpen }) {
         onPointerEnter={e => { if (e.pointerType === "mouse") open(); }}
         onPointerLeave={e => { if (e.pointerType === "mouse") hide(); }}
         onClick={() => { if (pointer.current === "mouse") open(); else if (show) hide(); else open(); }}
-        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: "50%", fontSize: 12, fontWeight: 600, color: "var(--text-tertiary)", border: "1px solid var(--border)", cursor: "help", userSelect: "none", marginLeft: 5, background: show ? "var(--fill-secondary)" : "transparent", transition: "all .15s" }}>i</span>
+        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: "50%", fontSize: 12, fontWeight: 500, color: "var(--text-tertiary)", border: "1px solid var(--border)", cursor: "help", userSelect: "none", marginLeft: 5, background: show ? "var(--fill-secondary)" : "transparent", transition: "all .15s" }}>i</span>
       {show && (
         <div ref={boxRef} style={{ position: "absolute", bottom: "calc(100% + 10px)", left: "50%", transform: `translateX(calc(-50% + ${dx}px))`, width: "min(300px, calc(100vw - 24px))", zIndex: 200 }}>
           <div className="anim-scale" style={{ background: "var(--surface)", padding: "14px 18px", borderRadius: "var(--radius-xs)", boxShadow: "var(--shadow-lg)", border: "1px solid var(--border)", fontSize: 14, lineHeight: 1.65, color: "var(--text-secondary)" }}>
@@ -471,6 +493,36 @@ function InfoTip({ text, onOpen }) {
         </div>
       )}
     </span>
+  );
+}
+
+/* ── The research behind it: a quiet line that opens a short, cited list ── */
+function References({ lang }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section style={{ marginTop: 56, borderTop: "1px solid var(--border)", paddingTop: 20 }}>
+      <button onClick={() => { const next = !open; setOpen(next); if (next) track("refs_opened"); }} aria-expanded={open}
+        style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "var(--font)", fontSize: 15, color: "var(--text-tertiary)" }}
+        onMouseEnter={e => { e.currentTarget.style.color = "var(--text-primary)"; }}
+        onMouseLeave={e => { e.currentTarget.style.color = "var(--text-tertiary)"; }}>
+        {lang === "zh" ? "背后的研究" : "The research behind it"} <span aria-hidden="true" style={{ display: "inline-block", transition: "transform .2s", transform: open ? "rotate(90deg)" : "none" }}>›</span>
+      </button>
+      {open && (
+        <ol className="anim-fade" style={{ listStyle: "none", margin: "18px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: 18 }}>
+          {REFERENCES.map((r, i) => (
+            <li key={i} style={{ fontSize: 15, lineHeight: 1.6 }}>
+              <div style={{ color: "var(--text-primary)" }}>{lang === "zh" ? r.zh : r.en}</div>
+              {r.url ? (
+                <a href={r.url} target="_blank" rel="noopener noreferrer"
+                  style={{ color: "var(--text-quaternary)", fontSize: 13.5, textDecoration: "underline", textDecorationColor: "var(--border)", textUnderlineOffset: 3 }}>{r.cite}</a>
+              ) : (
+                <span style={{ color: "var(--text-quaternary)", fontSize: 13.5 }}>{r.cite}</span>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
 }
 
@@ -486,7 +538,7 @@ function ContribBar({ item, maxAbs, lang }) {
         <div style={{ position: "absolute", top: 0, height: "100%", borderRadius: 2, transition: "width .6s var(--ease)", ...(neg ? { right: "50%", width: `${pct / 2}%`, background: "var(--caution)" } : { left: "50%", width: `${pct / 2}%`, background: "var(--positive)" }) }} />
         <div style={{ position: "absolute", left: "50%", top: -2, bottom: -2, width: 1, background: "var(--border)" }} />
       </div>
-      <span style={{ width: 48, textAlign: "right", fontSize: 14, fontWeight: 600, fontVariantNumeric: "tabular-nums", color: neg ? "var(--caution)" : "var(--positive)" }}>
+      <span style={{ width: 48, textAlign: "right", fontSize: 14, fontWeight: 500, fontVariantNumeric: "tabular-nums", color: neg ? "var(--caution)" : "var(--positive)" }}>
         {item.contribution > 0 ? "+" : ""}{item.contribution.toFixed(1)}
       </span>
     </div>
@@ -677,7 +729,7 @@ export default function Choosely() {
   const descField = lang === "zh" ? "descZh" : "desc";
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+    <div style={{ minHeight: "100vh", background: "transparent" }}>
       <style>{GLOBAL_CSS}</style>
       <div className="app-shell">
 
@@ -686,21 +738,17 @@ export default function Choosely() {
           {/* Language switch */}
           <button onClick={() => { const to = lang === "en" ? "zh" : "en"; setLang(to); track("lang_switched", { to }); }} style={{
             position: "absolute", top: 0, right: 0,
-            padding: "6px 16px", borderRadius: 20, fontSize: 14, fontWeight: 600,
-            border: "1.5px solid var(--border)", background: "var(--surface)",
-            color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font)",
+            padding: "6px 2px", borderRadius: 0, fontSize: 15, fontWeight: 400,
+            border: "none", background: "transparent",
+            color: "var(--text-quaternary)", cursor: "pointer", fontFamily: "var(--font)",
             transition: "all .2s var(--ease)",
           }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--border-hover)"; e.currentTarget.style.color = "var(--accent)"; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.color = "var(--text-secondary)"; }}
+          onMouseEnter={e => { e.currentTarget.style.color = "var(--text-primary)"; }}
+          onMouseLeave={e => { e.currentTarget.style.color = "var(--text-quaternary)"; }}
           >{t.langSwitch}</button>
 
           <div style={{ display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-            <svg width="32" height="32" viewBox="0 0 28 28" fill="none">
-              <rect width="28" height="28" rx="7" fill="var(--accent)" />
-              <path d="M8 14.5 L12 18.5 L20 10" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-            </svg>
-            <span style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-.03em" }}>{t.brand}</span>
+            <span style={{ fontSize: 26, fontWeight: 500, letterSpacing: "-.01em" }}>{t.brand}</span>
           </div>
           <p style={{ fontSize: 16, color: "var(--text-tertiary)", fontWeight: 400 }}>{t.tagline[step]}</p>
         </header>
@@ -719,14 +767,14 @@ export default function Choosely() {
             </div>
             <div className="options-list">
               {options.map((opt, i) => (
-                <Card key={opt.id} surface="option" className="option-card anim-fade" style={{ padding: "16px 20px", animationDelay: `${i * 40}ms` }}>
+                <Card key={opt.id} surface="option" className="option-card anim-fade" style={{ padding: "20px 24px", animationDelay: `${i * 40}ms` }}>
                   <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
                     <span style={{ fontSize: 21, fontWeight: 300, color: "var(--text-quaternary)", paddingTop: 1, fontVariantNumeric: "tabular-nums", minWidth: 20, textAlign: "center" }}>{i + 1}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <input value={opt[titleField]} onChange={e => updOpt(opt.id, "title", e.target.value)} placeholder={t.optionPlaceholder}
                         aria-label={`${t.optionPlaceholder} ${i + 1}`} autoFocus={opt.id === focusId}
                         data-blank-title={opt.title.trim() ? undefined : ""}
-                        style={{ width: "100%", border: "none", fontSize: 18, fontWeight: 600, background: "transparent", fontFamily: "var(--font)", color: "var(--text-primary)", marginBottom: 6, letterSpacing: "-.01em" }} />
+                        style={{ width: "100%", border: "none", fontSize: 18, fontWeight: 500, background: "transparent", fontFamily: "var(--font)", color: "var(--text-primary)", marginBottom: 6, letterSpacing: "0" }} />
                       <input value={opt[descField]} onChange={e => updOpt(opt.id, "desc", e.target.value)} placeholder={t.descPlaceholder}
                         aria-label={`${t.descPlaceholder} ${i + 1}`}
                         style={{ width: "100%", border: "none", fontSize: 15, background: "transparent", fontFamily: "var(--font)", color: "var(--text-tertiary)" }} />
@@ -744,12 +792,12 @@ export default function Choosely() {
               ))}
             </div>
             <button onClick={addOpt} style={{
-              width: "100%", marginTop: "clamp(14px, 2vw, 22px)", padding: "14px", borderRadius: "var(--radius)",
-              border: "1.5px dashed var(--border)", background: "transparent",
-              color: "var(--text-tertiary)", fontSize: 16, fontWeight: 500, cursor: "pointer", fontFamily: "var(--font)", transition: "all .2s",
+              marginTop: "clamp(14px, 2vw, 20px)", padding: "8px 2px", borderRadius: 0,
+              border: "none", background: "transparent",
+              color: "var(--text-tertiary)", fontSize: 16, fontWeight: 400, cursor: "pointer", fontFamily: "var(--font)", transition: "color .2s",
             }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--border-hover)"; e.currentTarget.style.color = "var(--accent)"; e.currentTarget.style.background = "var(--accent-lighter)"; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.color = "var(--text-tertiary)"; e.currentTarget.style.background = "transparent"; }}
+            onMouseEnter={e => { e.currentTarget.style.color = "var(--text-primary)"; }}
+            onMouseLeave={e => { e.currentTarget.style.color = "var(--text-tertiary)"; }}
             >{t.addOption}</button>
           </div>
         )}
@@ -772,15 +820,15 @@ export default function Choosely() {
                 const complete = done === total;
                 return (
                   <button key={opt.id} onClick={() => setRatingTab(i)} aria-current={ratingTab === i} style={{
-                    padding: "8px 18px", borderRadius: 20, fontSize: 15, fontWeight: ratingTab === i ? 600 : 400,
+                    padding: "8px 18px", borderRadius: 20, fontSize: 15, fontWeight: ratingTab === i ? 500 : 400,
                     border: "1.5px solid", cursor: "pointer", fontFamily: "var(--font)", transition: "all .2s var(--ease)",
-                    borderColor: ratingTab === i ? "var(--accent)" : complete ? "rgba(22,163,74,.22)" : "var(--border)",
+                    borderColor: ratingTab === i ? "var(--accent)" : complete ? "var(--positive-border)" : "var(--border)",
                     background: ratingTab === i ? "var(--accent-light)" : complete ? "var(--positive-bg)" : "var(--surface)",
                     color: ratingTab === i ? "var(--accent)" : complete ? "var(--positive)" : "var(--text-secondary)",
                     display: "flex", alignItems: "center", gap: 6,
                   }}>
                     <span className="ph-mask">{optTitle(opt) || `${t.optionProgress} ${i + 1}`}</span>
-                    {complete && <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5L5 9L9.5 3.5" stroke="var(--positive)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                    {complete && <Check size={13} color="var(--positive)" />}
                     {!complete && done > 0 && <span style={{ fontSize: 14, color: "var(--text-quaternary)" }}>{done}/{total}</span>}
                   </button>
                 );
@@ -791,7 +839,7 @@ export default function Choosely() {
             {options[ratingTab] && (
               <Card key={options[ratingTab].id} className="anim-scale" style={{ padding: 0, overflow: "hidden" }}>
                 <div style={{ padding: "16px 22px 14px", borderBottom: "1px solid var(--border)" }}>
-                  <div className="ph-mask" style={{ fontSize: 21, fontWeight: 600, letterSpacing: "-.01em" }}>{optTitle(options[ratingTab]) || (lang === "zh" ? "未命名选项" : "Untitled option")}</div>
+                  <div className="ph-mask" style={{ fontSize: 21, fontWeight: 500, letterSpacing: "0" }}>{optTitle(options[ratingTab]) || (lang === "zh" ? "未命名选项" : "Untitled option")}</div>
                   <div className="ph-mask" style={{ fontSize: 15, color: "var(--text-tertiary)", marginTop: 4 }}>{optDesc(options[ratingTab])}</div>
                 </div>
                 <div style={{ padding: "16px 22px 22px" }}>
@@ -819,12 +867,12 @@ export default function Choosely() {
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ fontSize: 14, color: "var(--text-tertiary)" }}>{t.optionProgress} {ratingTab + 1} {t.of} {options.length}</span>
                     <span style={{ fontSize: 13, color: allRated ? "var(--positive)" : "var(--text-quaternary)" }}>
-                      {allRated ? `✓ ${t.allDone}` : `${t.totalProgress} ${ratedCount.done}${t.of}${ratedCount.total}`}
+                      {allRated ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Check size={14} />{t.allDone}</span> : `${t.totalProgress} ${ratedCount.done}${t.of}${ratedCount.total}`}
                     </span>
                   </div>
                   <div style={{ display: "flex", gap: 4 }}>
                     {ratingTab > 0 && <button onClick={() => selectTab(ratingTab - 1)} style={{ padding: "5px 14px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-secondary)", fontSize: 14, cursor: "pointer", fontFamily: "var(--font)", fontWeight: 500 }}>{t.prev}</button>}
-                    {ratingTab < options.length - 1 && <button onClick={() => selectTab(ratingTab + 1)} style={{ padding: "5px 14px", borderRadius: 6, border: "none", background: "var(--accent)", color: "#fff", fontSize: 14, cursor: "pointer", fontFamily: "var(--font)", fontWeight: 500 }}>{t.next}</button>}
+                    {ratingTab < options.length - 1 && <button onClick={() => selectTab(ratingTab + 1)} style={{ padding: "5px 14px", borderRadius: 6, border: "none", background: "var(--accent)", color: "var(--on-accent)", fontSize: 14, cursor: "pointer", fontFamily: "var(--font)", fontWeight: 500 }}>{t.next}</button>}
                   </div>
                 </div>
               </Card>
@@ -840,7 +888,7 @@ export default function Choosely() {
             <Card style={{ padding: "22px 22px 18px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 4 }}>{t.weightsTitle}</div>
+                  <div style={{ fontSize: 14, fontWeight: 400, color: "var(--text-quaternary)", marginBottom: 4 }}>{t.weightsTitle}</div>
                   <div style={{ fontSize: 15, color: "var(--text-secondary)" }}>{t.weightsSubtitle}</div>
                 </div>
                 <div style={{ textAlign: "right" }}>
@@ -858,7 +906,7 @@ export default function Choosely() {
                         <span style={{ fontSize: 13, color: "var(--text-quaternary)", marginLeft: 6 }}>{lang === "zh" ? dim.en : dim.zh}</span>
                         <InfoTip text={dd(dim)} onOpen={() => track("tip_opened", { dimension: dim.id })} />
                       </div>
-                      <span style={{ fontSize: 16, fontWeight: 600, fontVariantNumeric: "tabular-nums", color: weights[dim.id] > 0 ? "var(--text-primary)" : "var(--text-quaternary)", minWidth: 42, textAlign: "right" }}>{shares[dim.id].toFixed(1)}%</span>
+                      <span style={{ fontSize: 16, fontWeight: 500, fontVariantNumeric: "tabular-nums", color: weights[dim.id] > 0 ? "var(--text-primary)" : "var(--text-quaternary)", minWidth: 42, textAlign: "right" }}>{shares[dim.id].toFixed(1)}%</span>
                     </div>
                     <input type="range" min={0} max={50} step={0.5} value={weights[dim.id]} aria-label={dn(dim)} onChange={e => setWeight(dim.id, +e.target.value)} style={{ width: "100%" }} />
                   </div>
@@ -880,13 +928,13 @@ export default function Choosely() {
         {step === 3 && (
           <div className="anim-fade">
             <div style={{ marginBottom: 16 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 700 }}>{t.resultsTitle}</h2>
+              <h2 style={{ fontSize: 18, fontWeight: 500 }}>{t.resultsTitle}</h2>
               <p style={{ fontSize: 14, color: "var(--text-tertiary)", marginTop: 4 }}>{t.resultsSubtitle}</p>
             </div>
 
             {/* Overview */}
             <Card style={{ padding: "18px 22px", marginBottom: 12 }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 12 }}>{t.overview}</div>
+              <div style={{ fontSize: 14, fontWeight: 400, color: "var(--text-quaternary)", marginBottom: 12 }}>{t.overview}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {results.map(opt => {
                   const maxS = Math.max(...results.map(o => Math.abs(o.score.total)), 1);
@@ -894,12 +942,12 @@ export default function Choosely() {
                   const isFirst = opt.rank === 1;
                   return (
                     <div key={opt.id} style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                      <span style={{ width: 20, fontSize: 16, fontWeight: isFirst ? 600 : 400, color: isFirst ? "var(--accent)" : "var(--text-quaternary)", textAlign: "center" }}>{opt.rank}</span>
+                      <span style={{ width: 20, fontSize: 16, fontWeight: isFirst ? 500 : 400, color: isFirst ? "var(--accent)" : "var(--text-quaternary)", textAlign: "center" }}>{opt.rank}</span>
                       <span className="ph-mask" style={{ width: 128, fontSize: 15, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{optTitle(opt)}</span>
                       <div style={{ flex: 1, height: 6, background: "var(--border)", borderRadius: 3, overflow: "hidden" }}>
                         <div style={{ height: "100%", borderRadius: 3, transition: "width .8s var(--ease)", width: `${Math.max(pct, 3)}%`, background: isFirst ? "var(--accent)" : "var(--text-quaternary)" }} />
                       </div>
-                      <span style={{ width: 50, textAlign: "right", fontSize: 16, fontWeight: 600, fontVariantNumeric: "tabular-nums", color: "var(--text-primary)" }}>{opt.score.total.toFixed(1)}</span>
+                      <span style={{ width: 50, textAlign: "right", fontSize: 16, fontWeight: 500, fontVariantNumeric: "tabular-nums", color: "var(--text-primary)" }}>{opt.score.total.toFixed(1)}</span>
                     </div>
                   );
                 })}
@@ -915,15 +963,15 @@ export default function Choosely() {
                 return (
                   <Card key={opt.id} className="anim-fade" style={{
                     animationDelay: `${ri * 60}ms`, overflow: "hidden",
-                    ...(isTop ? { border: "1.5px solid var(--accent)", boxShadow: "0 0 0 1px rgba(37,99,235,.2), var(--shadow-lg)" } : {}),
+                    ...(isTop ? { border: "1.5px solid var(--accent)", boxShadow: "none" } : {}),
                   }}>
                     <div onClick={() => { setExpanded(isOpen ? null : opt.id); if (!isOpen) track("result_expanded", { rank: opt.rank }); }} style={{ padding: "16px 20px", cursor: "pointer", userSelect: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
-                        <div style={{ width: 40, height: 40, borderRadius: "var(--radius-xs)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 600, flexShrink: 0, background: isTop ? "var(--accent)" : "var(--fill-secondary)", color: isTop ? "#fff" : "var(--text-tertiary)" }}>#{opt.rank}</div>
+                        <div style={{ width: 40, height: 40, borderRadius: "var(--radius-xs)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 500, flexShrink: 0, background: isTop ? "var(--accent)" : "var(--fill-secondary)", color: isTop ? "var(--on-accent)" : "var(--text-tertiary)" }}>#{opt.rank}</div>
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 17, fontWeight: 600, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <div style={{ fontSize: 17, fontWeight: 500, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                             <span className="ph-mask">{optTitle(opt)}</span>
-                            {isTop && <span style={{ fontSize: 14, fontWeight: 600, color: "var(--accent)", background: "var(--accent-light)", padding: "2px 10px", borderRadius: 10 }}>{t.recommended}</span>}
+                            {isTop && <span style={{ fontSize: 14, fontWeight: 500, color: "var(--accent)", background: "var(--accent-light)", padding: "2px 10px", borderRadius: 10 }}>{t.recommended}</span>}
                           </div>
                           <div className="ph-mask" style={{ fontSize: 14, color: "var(--text-tertiary)", marginTop: 3 }}>{optDesc(opt)}</div>
                         </div>
@@ -941,17 +989,17 @@ export default function Choosely() {
 
                     {isOpen && (
                       <div className="anim-fade" style={{ borderTop: "1px solid var(--border)", padding: 20 }}>
-                        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 12 }}>{t.contribution}</div>
+                        <div style={{ fontSize: 14, fontWeight: 400, color: "var(--text-quaternary)", marginBottom: 12 }}>{t.contribution}</div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 18 }}>
                           {opt.score.breakdown.map(b => <ContribBar key={b.id} item={b} maxAbs={maxAbs} lang={lang} />)}
                         </div>
 
-                        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 12 }}>{t.details}</div>
+                        <div style={{ fontSize: 14, fontWeight: 400, color: "var(--text-quaternary)", marginBottom: 12 }}>{t.details}</div>
                         <div className="results-detail-grid">
                           {opt.score.breakdown.map(b => (
                             <div key={b.id} style={{ padding: "12px 14px", background: "var(--fill-secondary)", borderRadius: "var(--radius-xs)" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                                <span style={{ fontSize: 14, fontWeight: 600, color: b.negative ? "var(--caution)" : "var(--text-primary)" }}>{dn(b)}</span>
+                                <span style={{ fontSize: 14, fontWeight: 500, color: b.negative ? "var(--caution)" : "var(--text-primary)" }}>{dn(b)}</span>
                                 <div style={{ display: "flex", gap: 3 }}>
                                   {[1, 2, 3, 4, 5].map(v => <div key={v} style={{ width: 5, height: 5, borderRadius: "50%", background: v <= b.raw ? (b.negative ? "var(--caution)" : "var(--accent)") : "var(--border)" }} />)}
                                 </div>
@@ -981,28 +1029,28 @@ export default function Choosely() {
             </div>
           )}
           <button onClick={() => goStep(step - 1)} disabled={step === 0} style={{
-            padding: "12px 28px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)",
-            background: "var(--surface)", color: step === 0 ? "var(--text-quaternary)" : "var(--text-secondary)",
-            fontSize: 16, fontWeight: 500, cursor: step === 0 ? "default" : "pointer",
-            fontFamily: "var(--font)", transition: "all .15s", opacity: step === 0 ? 0.4 : 1,
+            padding: "10px 4px", borderRadius: 0, border: "none",
+            background: "transparent", color: "var(--text-tertiary)",
+            fontSize: 16, fontWeight: 400, cursor: step === 0 ? "default" : "pointer",
+            fontFamily: "var(--font)", transition: "color .15s", visibility: step === 0 ? "hidden" : "visible",
           }}>{t.prevStep}</button>
 
           {step < 3 ? (
             <button onClick={onContinue} aria-disabled={!canNext} style={{
-              padding: "12px 32px", borderRadius: "var(--radius-sm)", border: "none",
+              padding: "11px 30px", borderRadius: "var(--radius-sm)", border: "none",
               background: canNext ? "var(--accent)" : "var(--text-quaternary)",
-              color: "#fff", fontSize: 16, fontWeight: 600, cursor: canNext ? "pointer" : "default",
+              color: "var(--on-accent)", fontSize: 16, fontWeight: 500, cursor: canNext ? "pointer" : "default",
               fontFamily: "var(--font)", transition: "all .2s var(--ease)",
-              boxShadow: canNext ? "0 2px 12px rgba(37,99,235,.35)" : "none",
+              boxShadow: "none",
             }}
             onMouseEnter={e => { if (canNext) e.currentTarget.style.transform = "translateY(-1px)"; }}
             onMouseLeave={e => { e.currentTarget.style.transform = "none"; }}
             >{t.nextStep}</button>
           ) : (
             <button onClick={() => { track("restart", { options_count: options.length }); goStep(0); setExpanded(null); }} style={{
-              padding: "12px 28px", borderRadius: "var(--radius-sm)", border: "none",
-              background: "var(--accent)", color: "#fff", fontSize: 16, fontWeight: 600,
-              cursor: "pointer", fontFamily: "var(--font)", boxShadow: "0 2px 12px rgba(37,99,235,.35)",
+              padding: "11px 28px", borderRadius: "var(--radius-sm)", border: "none",
+              background: "var(--accent)", color: "var(--on-accent)", fontSize: 16, fontWeight: 500,
+              cursor: "pointer", fontFamily: "var(--font)", boxShadow: "none",
             }}>{t.restart}</button>
           )}
         </div>
@@ -1010,6 +1058,8 @@ export default function Choosely() {
         {step === 0 && (
           <p style={{ marginTop: 28, textAlign: "center", fontSize: 13, lineHeight: 1.6, color: "var(--text-quaternary)" }}>{t.privacy}</p>
         )}
+
+        <References lang={lang} />
       </div>
     </div>
   );
